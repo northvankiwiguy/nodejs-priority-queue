@@ -7,7 +7,7 @@ build:
 	node-gyp build
 
 test: build
-	cd test && node test.js
+	cd test && npm test
 
 clean:
 	node-gyp clean

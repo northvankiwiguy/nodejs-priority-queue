@@ -1,0 +1,28 @@
+{
+  "name": "nodejs-priority-queue",
+  "version": "1.0.0",
+  "description": "This is a hobby project to create a NodeJS native plugin to support a `PriorityQueue` class in NodeJS. The goal of this work is learn more about how the V8 JavaScript engine works, and therefore all code is written to directly use V8's API (instead of any wrappers such as N-API).",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "jest": "^25.1.0"
+  },
+  "scripts": {
+    "test": "jest --rootDir ./test",
+    "install": "node-gyp rebuild"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/northvankiwiguy/nodejs-priority-queue.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "gypfile": true,
+  "bugs": {
+    "url": "https://github.com/northvankiwiguy/nodejs-priority-queue/issues"
+  },
+  "homepage": "https://github.com/northvankiwiguy/nodejs-priority-queue#readme"
+}
