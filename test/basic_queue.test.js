@@ -6,7 +6,7 @@ const data_types = require('../build/Release/data_types.node')
 
 let queue = undefined
 
-beforeAll(() => {
+beforeEach(() => {
   queue = new data_types.PriorityQueue()
 })
 
@@ -22,9 +22,19 @@ describe("queue lengths", () => {
     expect(queue.length).toBe(0)
   })
 
-  test.skip("pushing an item increases the length", () => {
+  test("pushing nothing will leave the queue as empty", () => {
+    queue.push()
+    expect(queue.length).toBe(0)
+  })
+
+  test("pushing an item increases the length", () => {
     queue.push(1)
     expect(queue.isEmpty()).toBe(false)
     expect(queue.length).toBe(1)
+  })
+
+  test("pushing five items gives a queue of length 5", () => {
+    queue.push(1, 2, 3, 4, 5)
+    expect(queue.length).toBe(5)
   })
 })

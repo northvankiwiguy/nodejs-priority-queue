@@ -10,9 +10,10 @@ namespace priority_queue {
 
     public:
       PriorityQueue();
-      // TODO: do we need a destructor?
+      ~PriorityQueue();
 
       unsigned int Length();
+      void push(void *value);
 
     private:
       unsigned int length;

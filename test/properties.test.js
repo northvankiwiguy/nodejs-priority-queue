@@ -35,10 +35,6 @@ describe("the length property", () => {
     })
   })
 
-  test.skip("When written to, changes the length of the queue", () => {
-
-  })
-
   test("can not be deleted", () => {
     delete queue.length
     expect(Object.getOwnPropertyNames(queue)).toContain("length")

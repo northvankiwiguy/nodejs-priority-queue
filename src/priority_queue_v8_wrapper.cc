@@ -20,6 +20,21 @@ namespace priority_queue_wrapper {
   }
 
   /**
+   * Finalizer, will be invoked whenever a PriorityQueue object is being garbage
+   * collected. The call back parameter will be a weak persistent reference to
+   * the PriorityQueue object. When called, we'll be the last reference
+   */
+  static void PriorityQueueDestructor(const WeakCallbackInfo<Persistent<Object>> &data) {
+    Persistent<Object> *persistentSelf = data.GetParameter();
+
+    /* Delete underlying queue - this assumes that the finalizer is only called once */
+    delete GetQueue(persistentSelf->Get(data.GetIsolate()));
+
+    /* reset the persistent handle - so it no longer refers to self */
+    persistentSelf->Reset();
+  }
+
+  /**
    * Constructor function for creating new PriorityQueue objects.
    */
   static void PriorityQueueFunction(const FunctionCallbackInfo<Value>& info) {
@@ -29,6 +44,14 @@ namespace priority_queue_wrapper {
     /* create a new PriorityQueue, and store it in a local/hidden field */
     PriorityQueue *queue = new PriorityQueue();
     self->SetInternalField(0, External::New(isolate, queue));
+
+    /*
+     * Create a Persistent-Weak handle to ourself, with a callback that'll be invoked
+     * when we're the only reference to the object. This must have kFinalizer callback
+     * type so that we can still access the fields of the object in the finalizer.
+     */
+    Persistent<Object> *persistentSelf = new Persistent<Object>(isolate, self);
+    persistentSelf->SetWeak(persistentSelf, PriorityQueueDestructor, WeakCallbackType::kFinalizer);
   }
 
   /**
@@ -43,15 +66,20 @@ namespace priority_queue_wrapper {
    */
   static void IsEmptyFunction(const FunctionCallbackInfo<Value>& info) {
     Isolate* isolate = info.GetIsolate();
-    info.GetReturnValue().Set(Boolean::New(isolate, true));
+    PriorityQueue *queue = GetQueue(info.Holder());
+    info.GetReturnValue().Set(Boolean::New(isolate, queue->Length() == 0));
   }
 
   /**
    * The "push" method for the PriorityQueue object.
    */
   static void PushFunction(const FunctionCallbackInfo<Value>& info) {
-    //Isolate* isolate = args.GetIsolate();
-    printf("Push Called");
+    Isolate* isolate = info.GetIsolate();
+    PriorityQueue *queue = GetQueue(info.Holder());
+    for (int i = 0; i < info.Length(); i++){
+      Persistent<Value> *value = new Persistent<Value>(isolate, info[i]);
+      queue->push(&value);
+    }
   }
 
   /**
@@ -138,7 +166,7 @@ namespace priority_queue_wrapper {
     AddPropertyToTemplate(isolate, proto_templ, "isEmpty", FunctionTemplate::New(isolate, IsEmptyFunction));
     AddPropertyToTemplate(isolate, proto_templ, "push", FunctionTemplate::New(isolate, PushFunction));
     AddPropertyToTemplate(isolate, proto_templ, "pop", FunctionTemplate::New(isolate, PopFunction));
-    AddPropertyToTemplate(isolate, proto_templ, "push", FunctionTemplate::New(isolate, ClearFunction));
+    AddPropertyToTemplate(isolate, proto_templ, "clear", FunctionTemplate::New(isolate, ClearFunction));
 
     /*
       * The instance template contains the prototypes that will be added directly to the
