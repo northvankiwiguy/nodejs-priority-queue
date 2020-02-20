@@ -38,3 +38,24 @@ describe("queue lengths", () => {
     expect(queue.length).toBe(5)
   })
 })
+
+describe("pushing data items with default sorting", () => {
+  test("popping from an empty queue return undefined", () => {
+    expect(queue.pop()).toBeUndefined()
+  })
+
+  test("one item - push on, pop off", () => {
+    queue.push(1234)
+    expect(queue.pop()).toBe(1234)
+  })
+
+  test("multiple items returned in correct order", () => {
+    queue.push(5, 4, 3, 2, 1)
+    expect(queue.pop()).toBe(1)
+    expect(queue.pop()).toBe(2)
+    expect(queue.pop()).toBe(3)
+    expect(queue.pop()).toBe(4)
+    expect(queue.pop()).toBe(5)
+    expect(queue.pop()).toBeUndefined()
+  })
+})

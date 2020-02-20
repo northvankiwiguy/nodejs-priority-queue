@@ -35,6 +35,11 @@ describe("the length property", () => {
     })
   })
 
+  test("can not be modified", () => {
+    queue.length = 42
+    expect(queue.length).toBe(0)
+  })
+
   test("can not be deleted", () => {
     delete queue.length
     expect(Object.getOwnPropertyNames(queue)).toContain("length")

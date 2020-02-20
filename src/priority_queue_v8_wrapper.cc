@@ -20,6 +20,25 @@ namespace priority_queue_wrapper {
   }
 
   /**
+   * Default sorting function, if the user doesn't provide one. Simply
+   * returns -1, 0, or +1 if a < b, a == b, or a > b.
+   */
+  static int DefaultSortAlgorithm(void *a, void *b, void *optData) {
+    Persistent<Value> *persA = static_cast<Persistent<Value> *>(a);
+    Persistent<Value> *persB = static_cast<Persistent<Value> *>(b);
+    Isolate *isolate = static_cast<Isolate *>(optData);
+
+    Local<Value> valA = persA->Get(isolate);
+    Local<Value> valB = persB->Get(isolate);
+
+    // TODO: make this work for all data types, using the < operator.
+    double doubleA = valA->NumberValue(isolate->GetCurrentContext()).ToChecked();
+    double doubleB = valB->NumberValue(isolate->GetCurrentContext()).ToChecked();
+
+    return doubleB - doubleA;
+  }
+
+  /**
    * Finalizer, will be invoked whenever a PriorityQueue object is being garbage
    * collected. The call back parameter will be a weak persistent reference to
    * the PriorityQueue object. When called, we'll be the last reference
@@ -42,7 +61,7 @@ namespace priority_queue_wrapper {
     Local<Object> self = info.Holder();
 
     /* create a new PriorityQueue, and store it in a local/hidden field */
-    PriorityQueue *queue = new PriorityQueue();
+    PriorityQueue *queue = new PriorityQueue(DefaultSortAlgorithm, isolate);
     self->SetInternalField(0, External::New(isolate, queue));
 
     /*
@@ -78,7 +97,7 @@ namespace priority_queue_wrapper {
     PriorityQueue *queue = GetQueue(info.Holder());
     for (int i = 0; i < info.Length(); i++){
       Persistent<Value> *value = new Persistent<Value>(isolate, info[i]);
-      queue->push(&value);
+      queue->push(value);
     }
   }
 
@@ -86,8 +105,14 @@ namespace priority_queue_wrapper {
    * The "pop" method for the PriorityQueue object.
    */
   static void PopFunction(const FunctionCallbackInfo<Value>& info) {
-    //Isolate* isolate = args.GetIsolate();
-    printf("Pop Called");
+    Isolate* isolate = info.GetIsolate();
+    PriorityQueue *queue = GetQueue(info.Holder());
+    Persistent<Value> *value = static_cast<Persistent<Value> *>(queue->pop());
+    if (value != nullptr) {
+      info.GetReturnValue().Set(value->Get(isolate));
+      value->Reset(); /* disconnect the value from the persistent reference */
+      delete value; /* destroy the persistent reference */
+    }
   }
 
   /**
@@ -147,21 +172,21 @@ namespace priority_queue_wrapper {
     HandleScope handle_scope(isolate);
 
     /* 
-      * A context is a sub-container of an Isolate, in which different programs can exist
-      * and run simultaneously.
-      */
+     * A context is a sub-container of an Isolate, in which different programs can exist
+     * and run simultaneously.
+     */
     Local<Context> context = isolate->GetCurrentContext();
 
     /* 
-      * Create a template for the PriorityQueue function that'll be used to construct new objects.
-      * This template can be used to create the actual Function, but only once per context.
-      */ 
+     * Create a template for the PriorityQueue function that'll be used to construct new objects.
+     * This template can be used to create the actual Function, but only once per context.
+     */
     Local<FunctionTemplate> fn_templ = FunctionTemplate::New(isolate, PriorityQueueFunction);
 
     /*
-      * The Prototype Template defines the properties of the function's prototype. These will
-      * appear in the prototype chain of any instances that are created.
-      */
+     * The "Prototype Template" defines the properties of the function's prototype. These will
+     * appear in the prototype chain of any instances that are created.
+     */
     Local<ObjectTemplate> proto_templ = fn_templ->PrototypeTemplate();
     AddPropertyToTemplate(isolate, proto_templ, "isEmpty", FunctionTemplate::New(isolate, IsEmptyFunction));
     AddPropertyToTemplate(isolate, proto_templ, "push", FunctionTemplate::New(isolate, PushFunction));
@@ -169,21 +194,20 @@ namespace priority_queue_wrapper {
     AddPropertyToTemplate(isolate, proto_templ, "clear", FunctionTemplate::New(isolate, ClearFunction));
 
     /*
-      * The instance template contains the prototypes that will be added directly to the
-      * object instances themselves. This is where we also reserve space for internal (hidden)
-      * fields that will be stored inside each object.
-      */
+     * The "Instance Template" contains the properties that will be added directly to the
+     * object instances themselves. This is where we also reserve space for internal (hidden)
+     * fields that will be stored inside each object.
+     */
     Local<ObjectTemplate> instance_templ = fn_templ->InstanceTemplate();
-    instance_templ->SetInternalFieldCount(1);
-    // TODO: make this an accessor.
     AddAccessorToTemplate(isolate, instance_templ, "length", LengthGetter);
+    instance_templ->SetInternalFieldCount(1); /* hidden - not accessible to JavaScript code */
 
-    // TODO: Use ReadOnlyPrototype() to ensure that properties are read-only.
-
+    /* create an instance of the Function, within the current context */
     Local<Function> fn = fn_templ->GetFunction(context).ToLocalChecked();
+
+    /* insert this Function into the "exports" */
     Local<String> fn_name = String::NewFromUtf8(isolate, "PriorityQueue", NewStringType::kInternalized).ToLocalChecked();
     fn->SetName(fn_name);
-
     exports->Set(context, fn_name, fn).Check();
   }
 }
