@@ -11,6 +11,16 @@ using priority_queue::PriorityQueue;
 namespace priority_queue_wrapper {
 
   /**
+   * Small structure of information that's passed to us whenever our sort function
+   * is called. This is necessary so we can correctly invoke the underlying JavaScript
+   * function.
+   */
+  struct callBackInfo {
+    Isolate *isolate;
+    Persistent<Function> *sortFunction;
+  };
+
+  /**
    * Helper for fetching the current object's PriorityQueue, given the
    * JavaScript callback info.
    */
@@ -20,22 +30,55 @@ namespace priority_queue_wrapper {
   }
 
   /**
+   * Helper function for throwing an exception
+   */
+  void ThrowTypeError(Isolate *isolate, const char *message) {
+    isolate->ThrowException(
+      Exception::TypeError(
+        String::NewFromUtf8(
+          isolate, message, NewStringType::kNormal).ToLocalChecked()));
+  }
+
+  /**
    * Default sorting function, if the user doesn't provide one. Simply
-   * returns -1, 0, or +1 if a < b, a == b, or a > b.
+   * returns > 0, 0, or <0 if a < b, a == b, or a > b.
    */
   static int DefaultSortAlgorithm(void *a, void *b, void *optData) {
-    Persistent<Value> *persA = static_cast<Persistent<Value> *>(a);
-    Persistent<Value> *persB = static_cast<Persistent<Value> *>(b);
-    Isolate *isolate = static_cast<Isolate *>(optData);
-
-    Local<Value> valA = persA->Get(isolate);
-    Local<Value> valB = persB->Get(isolate);
+    struct callBackInfo *cbInfo = static_cast<struct callBackInfo *>(optData);
+    Local<Value> valA = static_cast<Persistent<Value> *>(a)->Get(cbInfo->isolate);
+    Local<Value> valB = static_cast<Persistent<Value> *>(b)->Get(cbInfo->isolate);
 
     // TODO: make this work for all data types, using the < operator.
-    double doubleA = valA->NumberValue(isolate->GetCurrentContext()).ToChecked();
-    double doubleB = valB->NumberValue(isolate->GetCurrentContext()).ToChecked();
+    double doubleA = valA->NumberValue(cbInfo->isolate->GetCurrentContext()).ToChecked();
+    double doubleB = valB->NumberValue(cbInfo->isolate->GetCurrentContext()).ToChecked();
 
     return doubleB - doubleA;
+  }
+
+  /**
+   *  C++ wrapper function that invokes a JavaScript sort function.
+   */
+  static int JsFunctionWrapper(void *a, void *b, void *optData) {
+    /* details of the JavaScript function we need to call */
+    struct callBackInfo *cbInfo = static_cast<struct callBackInfo *>(optData);
+    Isolate *isolate = cbInfo->isolate;
+
+    /* Two values we'll be comparing */
+    Local<Value> args[2];
+    args[0] = static_cast<Persistent<Value> *>(a)->Get(isolate);
+    args[1] = static_cast<Persistent<Value> *>(b)->Get(isolate);
+
+    /* call the function (it's not a method, so receiver is undefined) */
+    Local<Value> result = cbInfo->sortFunction->Get(isolate)->CallAsFunction(
+      isolate->GetCurrentContext(), Undefined(isolate), 2, args).ToLocalChecked();
+
+    /* check that return value is a number */
+    if (!result->IsNumber()) {
+      ThrowTypeError(isolate, "Sort function must return a number.");
+    }
+
+    /* cast the result to an integer */
+    return static_cast<int>(Local<Number>::Cast(result)->Value());
   }
 
   /**
@@ -51,17 +94,34 @@ namespace priority_queue_wrapper {
 
     /* reset the persistent handle - so it no longer refers to self */
     persistentSelf->Reset();
+
+    // TODO: remove the persistent Function reference
   }
 
   /**
    * Constructor function for creating new PriorityQueue objects.
    */
-  static void PriorityQueueFunction(const FunctionCallbackInfo<Value>& info) {
+  static void PriorityQueueConstructor(const FunctionCallbackInfo<Value>& info) {
     Isolate* isolate = info.GetIsolate();
     Local<Object> self = info.Holder();
 
+    int (*sortFunction)(void *, void *, void *) = nullptr;
+    struct callBackInfo *cbInfo = new callBackInfo();
+    cbInfo->isolate = isolate;
+
+    /* either use the default sort function, or a wrapper around the user-provided sort function */
+    if (info.Length() == 0) {
+      sortFunction = DefaultSortAlgorithm;
+    } else {
+      if (!info[0]->IsFunction()) {
+        ThrowTypeError(isolate, "Sort function must be a function.");
+      }
+      cbInfo->sortFunction = new Persistent<Function>(isolate, Local<Function>::Cast(info[0]));
+      sortFunction = JsFunctionWrapper;
+    }
+
     /* create a new PriorityQueue, and store it in a local/hidden field */
-    PriorityQueue *queue = new PriorityQueue(DefaultSortAlgorithm, isolate);
+    PriorityQueue *queue = new PriorityQueue(sortFunction, static_cast<void *>(cbInfo));
     self->SetInternalField(0, External::New(isolate, queue));
 
     /*
@@ -181,7 +241,7 @@ namespace priority_queue_wrapper {
      * Create a template for the PriorityQueue function that'll be used to construct new objects.
      * This template can be used to create the actual Function, but only once per context.
      */
-    Local<FunctionTemplate> fn_templ = FunctionTemplate::New(isolate, PriorityQueueFunction);
+    Local<FunctionTemplate> fn_templ = FunctionTemplate::New(isolate, PriorityQueueConstructor);
 
     /*
      * The "Prototype Template" defines the properties of the function's prototype. These will
