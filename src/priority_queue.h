@@ -11,11 +11,11 @@ namespace priority_queue {
     public:
       /**
        * @param sorter A user-provided function for comparing `a` and `b`, returning -1, 0, or +1.
-       * @param optData Optional user-provided data that's passed to the `sorter` function.
+       * @param userData Optional user-provided data that's passed to the `sorter` function.
        */
       PriorityQueue(
-        int (*sorter)(void *a, void *b, void *optData),
-        void *optData = nullptr);
+        int (*sorter)(void *a, void *b, void *userData),
+        void *userData = nullptr);
       ~PriorityQueue();
 
       unsigned int Length();
@@ -26,8 +26,8 @@ namespace priority_queue {
       unsigned int length;
       unsigned int bufferLength;
       void **buffer;
-      int (*sorter)(void *a, void *b, void *optData);
-      void *optData;
+      int (*sorter)(void *a, void *b, void *userData);
+      void *userData;
 
       void siftUp(unsigned int position);
       void siftDown(unsigned int position);

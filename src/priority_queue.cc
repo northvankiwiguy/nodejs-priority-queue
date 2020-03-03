@@ -4,6 +4,11 @@
 
 using namespace std;
 
+/**
+ * This namespace contains a framework-neutral implementation of priority queues.
+ * It treats all data as a "void *", and uses a caller-provided sorting function
+ * to compare the relative order of two values.
+ */
 namespace priority_queue {
 
   /* the internal buffer is initially this big */
@@ -13,13 +18,13 @@ namespace priority_queue {
    * Create a new PriorityQueue.
    */
   PriorityQueue::PriorityQueue(
-    int (*sorter)(void *a, void *b, void *optData),
-    void *optData
+    int (*sorter)(void *a, void *b, void *userData),
+    void *userData
   ) {
     length = 0;
     buffer = new void *[InitialBufferSize];
     this->sorter = sorter;
-    this->optData = optData;
+    this->userData = userData;
   }
 
   /**
@@ -74,7 +79,7 @@ namespace priority_queue {
     bool sorted = false;
     while (position != 0 && !sorted) {
       unsigned int parentPosition = (position - 1) >> 1;
-      if (sorter(buffer[position], buffer[parentPosition], optData) > 0) {
+      if (sorter(buffer[position], buffer[parentPosition], userData) < 0) {
         /* parent and child in wrong order, swap them and continue up the heap */
         void *tmp = buffer[position];
         buffer[position] = buffer[parentPosition];
@@ -107,13 +112,13 @@ namespace priority_queue {
 
       /* is the left child lower than the root? */
       if (leftChildPosition < length &&
-            sorter(buffer[lowest], buffer[leftChildPosition], optData) < 0) {
+            sorter(buffer[lowest], buffer[leftChildPosition], userData) > 0) {
         lowest = leftChildPosition;
       }
 
       /* is the right child lower than the root and the left child? */
       if (rightChildPosition < length &&
-            sorter(buffer[lowest], buffer[rightChildPosition], optData) < 0) {
+            sorter(buffer[lowest], buffer[rightChildPosition], userData) > 0) {
         lowest = rightChildPosition;
       }
 

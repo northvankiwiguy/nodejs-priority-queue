@@ -57,5 +57,6 @@ describe("pushing data items with default sorting", () => {
     expect(queue.pop()).toBe(4)
     expect(queue.pop()).toBe(5)
     expect(queue.pop()).toBeUndefined()
+    expect(queue.isEmpty()).toBe(true)
   })
 })

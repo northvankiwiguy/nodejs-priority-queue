@@ -8,31 +8,49 @@ using namespace v8;
 using namespace std;
 using priority_queue::PriorityQueue;
 
+/**
+ * This namespace contains a wrapper around the standard PriorityQueue class, which is
+ * framework-neutral (knows nothing about V8). This wrapper class maps the inputs/outputs
+ * from V8 and invokes the underlying methods of the PriorityQueue class.
+ */
 namespace priority_queue_wrapper {
 
   /**
-   * Small structure of information that's passed to us whenever our sort function
-   * is called. This is necessary so we can correctly invoke the underlying JavaScript
-   * function.
+   * Small structure of information that's passed around. The priority_queue_wrapper
+   * namespace does not contain classes, but instead contains a number of class-less
+   * functions (this is necessary due to V8's approach of registering functions
+   * instead of methods into it's FunctionTemplate handlers).
+   *
+   * This callback structure is created with the JavaScript object is created, and deleted when
+   * the JavaScript object is destroyed.
    */
   struct callBackInfo {
+    /* the V8 Isolate that the JavaScript object belongs to */
     Isolate *isolate;
-    Persistent<Function> *sortFunction;
+
+    /* the underlying PriorityQueue object */
+    PriorityQueue *queue;
+
+    /* the V8 Function that we'll call when sorting the underlying PriorityQueue */
+    Persistent<Function> *jsSortFunction;
+
+    /* a back-reference to the JavaScript objectt that we're contained within */
+    Persistent<Object> *persistentSelf;
   };
 
   /**
-   * Helper for fetching the current object's PriorityQueue, given the
-   * JavaScript callback info.
+   * Helper for fetching the current object's underlying PriorityQueue,
+   * given the JavaScript callback info.
    */
-  PriorityQueue *GetQueue(Local<Object> self) {
-    return static_cast<PriorityQueue *>(
-      Local<External>::Cast(self->GetInternalField(0))->Value());
+  static PriorityQueue *GetQueue(Local<Object> self) {
+    return static_cast<callBackInfo *>(
+      Local<External>::Cast(self->GetInternalField(0))->Value())->queue;
   }
 
   /**
    * Helper function for throwing an exception
    */
-  void ThrowTypeError(Isolate *isolate, const char *message) {
+  static void ThrowTypeError(Isolate *isolate, const char *message) {
     isolate->ThrowException(
       Exception::TypeError(
         String::NewFromUtf8(
@@ -41,10 +59,10 @@ namespace priority_queue_wrapper {
 
   /**
    * Default sorting function, if the user doesn't provide one. Simply
-   * returns > 0, 0, or <0 if a < b, a == b, or a > b.
+   * returns < 0, 0, or > 0 if a < b, a == b, or a > b.
    */
-  static int DefaultSortAlgorithm(void *a, void *b, void *optData) {
-    struct callBackInfo *cbInfo = static_cast<struct callBackInfo *>(optData);
+  static int DefaultSortAlgorithm(void *a, void *b, void *userData) {
+    struct callBackInfo *cbInfo = static_cast<struct callBackInfo *>(userData);
     Local<Value> valA = static_cast<Persistent<Value> *>(a)->Get(cbInfo->isolate);
     Local<Value> valB = static_cast<Persistent<Value> *>(b)->Get(cbInfo->isolate);
 
@@ -52,15 +70,16 @@ namespace priority_queue_wrapper {
     double doubleA = valA->NumberValue(cbInfo->isolate->GetCurrentContext()).ToChecked();
     double doubleB = valB->NumberValue(cbInfo->isolate->GetCurrentContext()).ToChecked();
 
-    return doubleB - doubleA;
+    return doubleA - doubleB;
   }
 
   /**
-   *  C++ wrapper function that invokes a JavaScript sort function.
+   * C++ wrapper function that invokes a JavaScript sort function. This function is
+   * called by the underlying PriorityQueue object, and then invokes the user-provided
+   * JavaScript function.
    */
-  static int JsFunctionWrapper(void *a, void *b, void *optData) {
-    /* details of the JavaScript function we need to call */
-    struct callBackInfo *cbInfo = static_cast<struct callBackInfo *>(optData);
+  static int JsFunctionWrapper(void *a, void *b, void *userData) {
+    struct callBackInfo *cbInfo = static_cast<struct callBackInfo *>(userData);
     Isolate *isolate = cbInfo->isolate;
 
     /* Two values we'll be comparing */
@@ -69,7 +88,7 @@ namespace priority_queue_wrapper {
     args[1] = static_cast<Persistent<Value> *>(b)->Get(isolate);
 
     /* call the function (it's not a method, so receiver is undefined) */
-    Local<Value> result = cbInfo->sortFunction->Get(isolate)->CallAsFunction(
+    Local<Value> result = cbInfo->jsSortFunction->Get(isolate)->CallAsFunction(
       isolate->GetCurrentContext(), Undefined(isolate), 2, args).ToLocalChecked();
 
     /* check that return value is a number */
@@ -77,66 +96,82 @@ namespace priority_queue_wrapper {
       ThrowTypeError(isolate, "Sort function must return a number.");
     }
 
-    /* cast the result to an integer */
+    /* cast the result to an integer, which is what PriorityQueue expects */
     return static_cast<int>(Local<Number>::Cast(result)->Value());
   }
 
   /**
    * Finalizer, will be invoked whenever a PriorityQueue object is being garbage
-   * collected. The call back parameter will be a weak persistent reference to
-   * the PriorityQueue object. When called, we'll be the last reference
+   * collected. We know we're being garbage collected because this function is
+   * the "weak" callback that'll be invoked when there are no non-weak references
+   * left. The call back parameter is callBackInfo structure containing pointers
+   * to all the sub-objects we allocated.
    */
-  static void PriorityQueueDestructor(const WeakCallbackInfo<Persistent<Object>> &data) {
-    Persistent<Object> *persistentSelf = data.GetParameter();
+  static void PriorityQueueDestructor(const WeakCallbackInfo<struct callBackInfo> &data) {
+    struct callBackInfo *cbInfo = data.GetParameter();
 
     /* Delete underlying queue - this assumes that the finalizer is only called once */
-    delete GetQueue(persistentSelf->Get(data.GetIsolate()));
+    delete GetQueue(cbInfo->persistentSelf->Get(data.GetIsolate()));
 
-    /* reset the persistent handle - so it no longer refers to self */
-    persistentSelf->Reset();
+    /* Remove the persistent handle to ourselves */
+    cbInfo->persistentSelf->Reset();
 
-    // TODO: remove the persistent Function reference
+    /* Remove the persistent sort function reference */
+    if (cbInfo->jsSortFunction) {
+      cbInfo->jsSortFunction->Reset();
+    }
+
+    /* Remove the callback information block */
+    delete cbInfo;
   }
 
   /**
-   * Constructor function for creating new PriorityQueue objects.
+   * Constructor function for creating new PriorityQueue objects. The user may optionally
+   * provide a function for sorting two values (the function returns -1, 0, 1 to indicate
+   * ordering of two values). Within the new JavaScript object, we create a callBackInfo
+   * structure that holds all the internal data structures.
    */
   static void PriorityQueueConstructor(const FunctionCallbackInfo<Value>& info) {
     Isolate* isolate = info.GetIsolate();
-    Local<Object> self = info.Holder();
+    Local<Object> localSelf = info.Holder();
 
-    int (*sortFunction)(void *, void *, void *) = nullptr;
+    /* we'll use this info block to store all the internal data structures we're creating */
     struct callBackInfo *cbInfo = new callBackInfo();
+
+    /* this is necessary later, when we need to access input/output values */
     cbInfo->isolate = isolate;
 
     /* either use the default sort function, or a wrapper around the user-provided sort function */
+    int (*sortFunction)(void *, void *, void *) = nullptr;
     if (info.Length() == 0) {
       sortFunction = DefaultSortAlgorithm;
     } else {
       if (!info[0]->IsFunction()) {
         ThrowTypeError(isolate, "Sort function must be a function.");
       }
-      cbInfo->sortFunction = new Persistent<Function>(isolate, Local<Function>::Cast(info[0]));
+      cbInfo->jsSortFunction = new Persistent<Function>(isolate, Local<Function>::Cast(info[0]));
       sortFunction = JsFunctionWrapper;
     }
 
-    /* create a new PriorityQueue, and store it in a local/hidden field */
-    PriorityQueue *queue = new PriorityQueue(sortFunction, static_cast<void *>(cbInfo));
-    self->SetInternalField(0, External::New(isolate, queue));
+    /* create a new PriorityQueue object, passing in our callback info */
+    cbInfo->queue = new PriorityQueue(sortFunction, static_cast<void *>(cbInfo));
 
     /*
      * Create a Persistent-Weak handle to ourself, with a callback that'll be invoked
      * when we're the only reference to the object. This must have kFinalizer callback
      * type so that we can still access the fields of the object in the finalizer.
      */
-    Persistent<Object> *persistentSelf = new Persistent<Object>(isolate, self);
-    persistentSelf->SetWeak(persistentSelf, PriorityQueueDestructor, WeakCallbackType::kFinalizer);
+    cbInfo->persistentSelf = new Persistent<Object>(isolate, localSelf);
+    cbInfo->persistentSelf->SetWeak(cbInfo, PriorityQueueDestructor, WeakCallbackType::kFinalizer);
+
+    /* store the call back info in a hidden field within the JavaScript object */
+    localSelf->SetInternalField(0, External::New(isolate, cbInfo));
   }
 
   /**
    * Get-accessor function for the "length" property
    */
-  void LengthGetter(Local<Name> property, const PropertyCallbackInfo<Value>& info) {
+  static void LengthGetter(Local<Name> property, const PropertyCallbackInfo<Value>& info) {
     info.GetReturnValue().Set(GetQueue(info.Holder())->Length());
   }
 

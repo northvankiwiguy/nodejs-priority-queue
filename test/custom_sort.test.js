@@ -7,17 +7,17 @@ let queue = undefined
 
 /* Basic sorting by numbers */
 function numberSortFunction(a, b) {
-  return b - a;
+  return a - b;
 }
 
 /* Basic sorting by string */
 function stringSortFunction(a, b) {
   if (a < b) {
-    return 1
+    return -1
   } else if (a === b) {
     return 0
   } else {
-    return -1
+    return 1
   }
 }
 
