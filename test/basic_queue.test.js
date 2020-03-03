@@ -60,3 +60,20 @@ describe("pushing data items with default sorting", () => {
     expect(queue.isEmpty()).toBe(true)
   })
 })
+
+describe("clear function", () => {
+  it('has no effect on an empty queue', () => {
+    expect(queue.isEmpty()).toBe(true)
+    queue.clear()
+    expect(queue.isEmpty()).toBe(true)
+  })
+
+  it("discards all values from the queue", () => {
+    queue.push(5, 4, 3, 2, 1)
+
+    expect(queue.isEmpty()).toBe(false)
+    queue.clear()
+    expect(queue.isEmpty()).toBe(true)
+    expect(queue.pop()).toBeUndefined()
+  })
+})

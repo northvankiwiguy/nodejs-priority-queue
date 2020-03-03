@@ -211,11 +211,18 @@ namespace priority_queue_wrapper {
   }
 
   /**
-   * The "clear" method for the PriorityQueue object.
+   * The "clear" method for the PriorityQueue object. This involves
+   * popping all the values off the queue, and removing the persistent handle
+   * that we created to refer to the values.
    */
   static void ClearFunction(const FunctionCallbackInfo<Value>& info) {
-    //Isolate* isolate = args.GetIsolate();
-    printf("Clear Called");
+    Isolate* isolate = info.GetIsolate();
+    PriorityQueue *queue = GetQueue(info.Holder());
+    while (queue->Length() != 0) {
+      Persistent<Value> *value = static_cast<Persistent<Value> *>(queue->pop());
+      value->Reset();
+      delete value;
+    }
   }
 
   /**
